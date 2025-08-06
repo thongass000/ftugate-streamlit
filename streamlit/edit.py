@@ -46,7 +46,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# API functions - Sử dụng API thực tế của QLDT PTIT
+# API functions - Sử dụng API thực tế của FTUGate
 class QLDTApi:
     def __init__(self):
         self.base_url = "https://ftugate.ftu.edu.vn"
@@ -69,10 +69,14 @@ class QLDTApi:
     
     def _post(self, path, data=None, json=None, token=None, content_type=None):
         url = f"{self.base_url}{path}"
+        proxies = {
+            'http': 'http://113.160.132.195:8080',
+            'https': 'http://113.160.132.195:8080'
+        }
         headers = self.default_headers.copy()
         if token: headers['Authorization'] = f'Bearer {token}'
         if content_type: headers['Content-Type'] = content_type
-        resp = requests.post(url, data=data, json=json, headers=headers)
+        resp = requests.post(url, data=data, json=json, proxies=proxies, headers=headers)
         resp.raise_for_status()
         return resp.json()
     
@@ -427,7 +431,7 @@ else:
     # Hiển thị hướng dẫn
     st.markdown("---")
     st.subheader("📝 Hướng dẫn sử dụng")
-    st.write("1. **Đăng nhập:** Nhập tên đăng nhập và mật khẩu QLDT PTIT vào sidebar")
+    st.write("1. **Đăng nhập:** Nhập tên đăng nhập và mật khẩu FTUGate vào sidebar")
     st.write("2. **Xác thực:** Nhấn nút 'Đăng nhập' để kết nối tới server thực")
     st.write("3. **Tải dữ liệu:** Sau khi đăng nhập thành công, nhấn 'Tải danh sách môn học đã đăng ký'")
     st.write("4. **Xem thông tin:** Xem thông tin chi tiết từng môn học đã đăng ký")
@@ -435,7 +439,7 @@ else:
     
     st.markdown("---")
     st.subheader("⚠️ Lưu ý quan trọng")
-    st.warning("🔒 Ứng dụng này kết nối trực tiếp với server QLDT PTIT. Vui lòng sử dụng tài khoản thực của bạn.")
+    st.warning("🔒 Ứng dụng này kết nối trực tiếp với server FTUGate. Vui lòng sử dụng tài khoản thực của bạn.")
     st.info("🔄 Nếu gặp lỗi đăng nhập, vui lòng kiểm tra lại thông tin tài khoản hoặc thử lại sau.")
     st.info("⏱️ Token đăng nhập có thể hết hạn, vui lòng đăng nhập lại nếu cần thiết.")
 
