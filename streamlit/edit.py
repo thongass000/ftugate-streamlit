@@ -1,9 +1,16 @@
 import streamlit as st
+import os
 import requests
 import json
 import pandas as pd
 from datetime import datetime
 import time
+from collections import defaultdict
+import streamlit.components.v1 as components
+import certifi
+
+os.environ['HTTP_PROXY'] = 'http://113.160.132.195:8080'
+os.environ['HTTPS_PROXY'] = 'http://113.160.132.195:8080'
 
 # Cấu hình page
 st.set_page_config(
@@ -54,29 +61,14 @@ class QLDTApi:
             'Content-Type': 'application/json',
             'Accept': 'application/json, text/plain, */*',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
-            'Origin': 'https://ftugate.ftu.edu.vn',
-            'Referer': 'https://ftugate.ftu.edu.vn/',
-            'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
-            'sec-ch-ua': '"Google Chrome";v="137", "Chromium";v="137", "Not/A)Brand";v="24"',
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"',
-            'sec-fetch-dest': 'empty',
-            'sec-fetch-mode': 'cors',
-            'sec-fetch-site': 'same-origin'
         }
     
     def _post(self, path, data=None, json=None, token=None, content_type=None):
         url = f"{self.base_url}{path}"
-        proxies = {
-            'http': 'http://113.160.132.195:8080',
-            'https': 'http://113.160.132.195:8080'
-        }
         headers = self.default_headers.copy()
         if token: headers['Authorization'] = f'Bearer {token}'
         if content_type: headers['Content-Type'] = content_type
-        resp = requests.post(url, data=data, json=json, proxies=proxies, headers=headers)
+        resp = requests.post(url, data=data, json=json, proxies={'http': 'http://113.160.132.195:8080','https': 'http://113.160.132.195:8080'}, headers=headers, verify=certifi.where())
         resp.raise_for_status()
         return resp.json()
     
@@ -235,7 +227,15 @@ with st.sidebar:
                         st.session_state.logged_in = True
                         st.session_state.user_info = login_data
                         st.session_state.token = login_data["access_token"]
-                        st.session_state.login_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        # Parse 'logtime' from API response
+                        logtime_str = login_data.get("logtime", "")
+                        try:
+                            logtime_parsed = datetime.strptime(logtime_str, "%y%m%d%H%M%S")
+                            st.session_state.login_time = logtime_parsed.strftime("%Y-%m-%d %H:%M:%S")
+                            st.session_state.token_expiry_ts = int(logtime_parsed.timestamp()) + login_data["expires_in"]
+                        except ValueError:
+                            st.session_state.login_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            st.session_state.token_expiry_ts = int(time.time()) + login_data["expires_in"]
                         st.success("Đăng nhập thành công!")
                         time.sleep(1)
                         st.rerun()
@@ -254,12 +254,60 @@ with st.sidebar:
             st.write(f"**Họ tên:** {user_info['name']}")
         if 'student_id' in user_info:
             st.write(f"**Mã SV:** {user_info['student_id']}")
-        if 'expires_in' in user_info:
-            st.write(f"**Token hết hạn:** {user_info['expires_in']}s")
-        
-        # Hiển thị thời gian đăng nhập
-        if 'login_time' in st.session_state:
-            st.write(f"**Đăng nhập lúc:** {st.session_state.login_time}")
+        if "token_expiry_ts" in st.session_state:
+            if "token_expiry_ts" in st.session_state:
+                components.html(f"""
+                    <html>
+                    <head>
+                        <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@400;600&display=swap" rel="stylesheet">
+                        <style>
+                            body {{
+                                margin: 0;
+                                padding: 0;
+                                font-family: 'Source Sans Pro', sans-serif;
+                            }}
+                            #countdown-container {{
+                                font-size: 16px;
+                                font-weight: 600;
+                                color: #32CD32;
+                                # margin-top: 10px;
+                                text-align: left;
+                                padding-left: 0;
+                            }}
+                        </style>
+                    </head>
+                    <body>
+                        <div id="countdown-container">
+                            <span>Token còn lại:</span>
+                            <span id="countdown" style="font-family: 'Source Sans Pro', sans-serif;">--:--</span>
+                        </div>
+                        <script>
+                            function updateCountdown() {{
+                                var expiry = {st.session_state.token_expiry_ts} * 1000;
+                                var now = new Date().getTime();
+                                var distance = expiry - now;
+
+                                var countdownEl = document.getElementById("countdown");
+
+                                if (distance <= 0) {{
+                                    countdownEl.innerHTML = "Hết hạn";
+                                    countdownEl.style.color = "red";
+                                    clearInterval(x);
+                                    return;
+                                }}
+
+                                var minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                                var seconds = Math.floor((distance % (1000 * 60)) / 1000);
+                                countdownEl.innerHTML =
+                                    ("0" + minutes).slice(-2) + ":" + ("0" + seconds).slice(-2);
+                            }}
+
+                            updateCountdown();
+                            var x = setInterval(updateCountdown, 1000);
+                        </script>
+                    </body>
+                    </html>
+                """, height=40)
         
         if st.button("Đăng xuất"):
             try:
@@ -370,7 +418,100 @@ if st.session_state.logged_in:
                                 st.write(f"• {part.strip()}")
         else:
             st.info("Không có môn học nào được đăng ký trong học kỳ này.")
-        
+
+        # Ensure session states
+        st.session_state.setdefault("selected_classes", [])
+        st.session_state.setdefault("available_sections", [])
+
+        # Automatically load class list and fill in ten_mon
+        if not st.session_state.available_sections:
+            with st.spinner("Đang tải danh sách lớp..."):
+                try:
+                    section_data = api.get_sections(st.session_state.token)
+                    ds_nhom_to = section_data.get("ds_nhom_to", [])
+                    ds_mon_hoc = section_data.get("ds_mon_hoc", [])
+                    mon_dict = {m["ma"].strip(): m["ten"] for m in ds_mon_hoc if m.get("ma") and m.get("ten")}
+                    for nhom in ds_nhom_to:
+                        ma_mon = nhom.get("ma_mon", "").strip()
+                        nhom["ten_mon"] = mon_dict.get(ma_mon, "")
+                    st.session_state.available_sections = ds_nhom_to
+                except Exception as e:
+                    st.error(f"Lỗi khi tải danh sách lớp: {str(e)}")
+
+        st.markdown("---")
+        st.subheader("📝 Đăng ký lớp tín chỉ")
+
+        # Live search
+        search_query = st.text_input("🔍 Tìm lớp học (mã môn, tên môn hoặc nhóm):")
+
+        if len(search_query.strip()) >= 3:
+            query = search_query.lower()
+            groups = defaultdict(lambda: defaultdict(list))
+
+            for s in st.session_state.available_sections:
+                combined = f"{s.get('ma_mon', '')} {s.get('ten_mon', '')} {s.get('nhom_to', '')}".lower()
+                if query in combined:
+                    ten_mon = s.get('ten_mon', 'Không rõ')
+                    ma_mon = s.get('ma_mon', 'N/A')
+                    groups[ten_mon][ma_mon].append(s)
+
+            for ten_mon, ma_mon_dict in list(groups.items())[:5]:
+                with st.expander(f"📚 {ten_mon}", expanded=False):
+                    for ma_mon, sections in ma_mon_dict.items():
+                        with st.expander(f"📘 {ma_mon}", expanded=False):
+                            for s in sections:
+                                label = f"{s['ma_mon']} - {ten_mon} (Nhóm {s['nhom_to']})"
+                                already_selected = any(cls['label'] == label for cls in st.session_state.selected_classes)
+                                if not already_selected:
+                                    if st.button(f"➕ {label}", key=f"add_{s['id_to_hoc']}"):
+                                        st.session_state.selected_classes.append({'id': s['id_to_hoc'], 'label': label})
+        else:
+            if search_query:
+                st.warning("Vui lòng nhập ít nhất 3 ký tự để tìm lớp.")
+
+        # Show selected classes (cart)
+        if st.session_state.selected_classes:
+            st.markdown("### 🛒 Lớp đã chọn:")
+            for i, cls in enumerate(st.session_state.selected_classes):
+                col1, col2 = st.columns([6, 1])
+                with col1:
+                    st.markdown(f"- {cls['label']}")
+                with col2:
+                    if st.button("❌", key=f"remove_{i}"):
+                        st.session_state.selected_classes.pop(i)
+                        st.session_state["rerun_flag"] = True
+                        break
+
+            if st.button("✅ Đăng ký tất cả lớp đã chọn"):
+                with st.spinner("Đang thực hiện đăng ký..."):
+                    success, fail = 0, 0
+                    failed_labels = []  # <-- define this
+                    for cls in st.session_state.selected_classes:
+                        try:
+                            result = api.register_course(st.session_state.token, cls['id'])
+                            if result.get("data", {}).get("is_thanh_cong"):
+                                st.success(f"✅ {cls['label']}")
+                                success += 1
+                            else:
+                                st.error(f"❌ {cls['label']}: {result.get('data', {}).get('thong_bao_loi', 'Không rõ lỗi')}")
+                                fail += 1
+                                failed_labels.append(cls['label'])
+                        except Exception as e:
+                            st.error(f"⚠️ {cls['label']}: {str(e)}")
+                            fail += 1
+                            failed_labels.append(cls['label'])
+                    st.info(f"Hoàn tất: {success} thành công, {fail} thất bại.")
+                    st.session_state.selected_classes = [
+                        cls for cls in st.session_state.selected_classes
+                        if cls['label'] in failed_labels
+                    ]
+
+        # Rerun handler
+        if st.session_state.get("rerun_flag"):
+            del st.session_state["rerun_flag"]
+            st.rerun()
+
+
         # Xuất dữ liệu
         st.markdown("---")
         st.subheader("📊 Xuất dữ liệu")
